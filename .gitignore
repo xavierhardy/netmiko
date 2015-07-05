@@ -1,5 +1,6 @@
 *.pyc
 *.swp
+.pypirc
 tests/old_format/DEVICE_CREDS.py
 tests/test_prep.sh
 tests/standard_tests.sh
@@ -8,3 +9,4 @@ tests/etc/commands.yml
 tests/etc/responses.yml
 examples/SECRET_DEVICE_CREDS.py
 build
+dist
