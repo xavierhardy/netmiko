@@ -30,6 +30,7 @@ from netmiko.dell import DellForce10SSH
 # The keys of this dictionary are the supported device_types
 CLASS_MAPPER_BASE = {
     'cisco_ios': CiscoIosSSH,
+    'cisco_ios_telnet': CiscoIosSSH,
     'cisco_xe': CiscoIosSSH,
     'cisco_asa': CiscoAsaSSH,
     'cisco_nxos': CiscoNxosSSH,

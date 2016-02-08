@@ -15,10 +15,12 @@ import time
 import socket
 import re
 import io
+import telnetlib
 from os import path
 
 from netmiko.netmiko_globals import MAX_BUFFER
 from netmiko.ssh_exception import NetMikoTimeoutException, NetMikoAuthenticationException
+from netmiko.shared_functions import write_bytes
 
 
 class BaseSSHConnection(object):
@@ -46,22 +48,43 @@ class BaseSSHConnection(object):
         # set in set_base_prompt method
         self.base_prompt = ''
 
-        if not ssh_strict:
-            self.key_policy = paramiko.AutoAddPolicy()
+        # determine if telnet or SSH
+        if '_telnet' in device_type:
+            self.protocol = 'telnet'
+            self.telnet_establish_connection()
         else:
-            self.key_policy = paramiko.RejectPolicy()
+            self.protocol = 'ssh' 
+            if not ssh_strict:
+                self.key_policy = paramiko.AutoAddPolicy()
+            else:
+                self.key_policy = paramiko.RejectPolicy()
 
-        # Options for SSH host_keys
-        self.system_host_keys = system_host_keys
-        self.alt_host_keys = alt_host_keys
-        self.alt_key_file = alt_key_file
+            # Options for SSH host_keys
+            self.system_host_keys = system_host_keys
+            self.alt_host_keys = alt_host_keys
+            self.alt_key_file = alt_key_file
 
-        # For SSH proxy support
-        self.ssh_config_file = ssh_config_file
+            # For SSH proxy support
+            self.ssh_config_file = ssh_config_file
 
-        self.establish_connection(verbose=verbose, use_keys=use_keys, key_file=key_file)
+            self.establish_connection(verbose=verbose, use_keys=use_keys, key_file=key_file)
+
         self.session_preparation()
 
+    def write_channel(self, out_data):
+        '''Generic handler that will write both to SSH session and a telnet session'''
+        if self.protocol == 'ssh':
+            self.remote_conn.sendall(write_bytes(out_data))
+        elif self.protocol == 'telnet':
+            self.remote_conn.write(write_bytes(out_data))
+        else:
+            raise ValueError("Invalid protocol specified")
+
+    def read_channel(self):
+        '''Generic handler that will read an SSH channel and a telnet channel'''
+        pass
+        
+        
     def session_preparation(self):
         '''
         Prepare the session after the connection has been established
@@ -122,6 +145,60 @@ class BaseSSHConnection(object):
             'key_filename': key_file,
             'timeout': timeout,
         }
+        
+    def telnet_establish_connection(self, timeout=12):
+        '''Establish telnet Connection using telnetlib'''
+        
+        self.remote_conn = telnetlib.Telnet(self.ip, port=self.port, timeout=timeout)
+        self.telnet_login()
+
+    def telnet_login(self):
+        '''Telnet login'''
+        debug = True
+        telnet_delay = .5
+        read_until_timeout = 3
+        max_attempts = 30
+
+        # Delay to allow HP ProCurve to put up initial banner
+        # Should move to HP Specific Driver?
+        time.sleep(2 * telnet_delay)
+        output = u''
+        i = 1
+        while i <= max_attempts:
+            try:
+                read_data = self.remote_conn.read_very_eager()
+                if debug:
+                    print(read_data)
+                if re.search("sername", read_data):
+                    print("Z1")
+                    self.write_channel(self.username + u'\n')
+                    time.sleep(2 * telnet_delay)
+                    output += self.remote_conn.read_very_eager().decode('utf-8', 'ignore')
+                    if debug: 
+                        print(output)
+                elif re.search("assword", output):
+                    print("Z2")
+                    self.write_channel(self.password + u"\n")
+                    output += self.remote_conn.read_very_eager().decode('utf-8', 'ignore')
+                    if debug: 
+                        print(output)
+                    time.sleep(telnet_delay)
+                    output = self.remote_conn.read_very_eager().decode('utf-8', 'ignore')
+                    if '>' in output or '#' in output:
+                        print("Z3")
+                        print(output)
+                        return output
+                else:
+                    self.write_channel(u"\n")
+                    time.sleep(telnet_delay)
+                i += 1
+            except EOFError:
+                msg = "Telnet login failed: {0}".format(self.ip)
+                raise NetMikoAuthenticationException(msg)
+
+        msg = "Telnet login failed: {0}".format(self.ip)
+        raise NetMikoAuthenticationException(msg)
+
 
     def establish_connection(self, sleep_time=3, verbose=True, timeout=8,
                              use_keys=False, key_file=None):
@@ -185,7 +262,7 @@ class BaseSSHConnection(object):
             i = 0
             while i <= 10:
                 # Send a newline if no data is present
-                self.remote_conn.sendall('\n')
+                self.write_channel(u'\n')
                 time.sleep(.5)
                 if self.remote_conn.recv_ready():
                     return self.remote_conn.recv(MAX_BUFFER).decode('utf-8', 'ignore')
@@ -215,7 +292,7 @@ class BaseSSHConnection(object):
         Disable paging default to a Cisco CLI method
         '''
         delay_factor = self.select_delay_factor(delay_factor)
-        self.remote_conn.sendall(command)
+        self.write_channel(command)
         time.sleep(1 * delay_factor)
 
         # Clear the buffer on the screen
@@ -260,7 +337,7 @@ class BaseSSHConnection(object):
 
         delay_factor = self.select_delay_factor(delay_factor)
         self.clear_buffer()
-        self.remote_conn.sendall("\n")
+        self.write_channel(u"\n")
         self.wait_for_recv_ready(delay_factor)
         prompt = self.remote_conn.recv(MAX_BUFFER).decode('utf-8', 'ignore')
 
@@ -301,7 +378,7 @@ class BaseSSHConnection(object):
 
         delay_factor = self.select_delay_factor(delay_factor)
         self.clear_buffer()
-        self.remote_conn.sendall("\n")
+        self.write_channel(u"\n")
         time.sleep(1 * delay_factor)
 
         prompt = self.remote_conn.recv(MAX_BUFFER).decode('utf-8', 'ignore')
@@ -357,7 +434,7 @@ class BaseSSHConnection(object):
         if debug:
             print("Command is: {0}".format(command_string))
 
-        self.remote_conn.sendall(command_string)
+        self.write_channel(command_string)
 
         time.sleep(1 * delay_factor)
         not_done = True
@@ -426,7 +503,7 @@ class BaseSSHConnection(object):
             if self.remote_conn.recv_ready():
                 # Clear any existing data
                 self.remote_conn.recv(MAX_BUFFER).decode('utf-8', 'ignore')
-            self.remote_conn.sendall("\n")
+            self.write_channel(u"\n")
             if self.remote_conn.recv_ready():
                 prompt = self.remote_conn.recv(MAX_BUFFER).decode('utf-8', 'ignore')
             else:
@@ -444,7 +521,7 @@ class BaseSSHConnection(object):
         if debug:
             print("Command is: {0}".format(command_string))
             print("Search to stop receiving data is: '{0}'".format(search_pattern))
-        self.remote_conn.sendall(command_string)
+        self.write_channel(command_string)
 
         # Initial delay after sending command
         time.sleep(delay_factor * 1)
