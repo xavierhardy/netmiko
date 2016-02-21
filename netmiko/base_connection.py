@@ -82,9 +82,25 @@ class BaseSSHConnection(object):
 
     def read_channel(self):
         '''Generic handler that will read an SSH channel and a telnet channel'''
-        pass
-        
-        
+        if self.protocol == 'ssh':
+            if self.remote_conn.recv_ready():
+                return self.remote_conn.recv(MAX_BUFFER).decode('utf-8', 'ignore')
+            else:
+                return u''
+        elif self.protocol == 'telnet':
+            return self.remote_conn.read_very_eager().decode('utf-8', 'ignore')
+        else:
+            raise ValueError("Invalid protocol specified")
+
+    def check_recv(self):
+        '''Generic handler that checks whether data is available for SSH and telnet'''
+        if self.protocol == 'ssh':
+            return self.remote_conn.recv_ready()
+        elif self.protocol == 'telnet':
+            pass
+        else:
+            raise ValueError("Invalid protocol specified")
+
     def session_preparation(self):
         '''
         Prepare the session after the connection has been established
@@ -255,20 +271,18 @@ class BaseSSHConnection(object):
             print("Interactive SSH session established")
 
         time.sleep(sleep_time)
-        # Strip any initial data
-        if self.remote_conn.recv_ready():
-            return self.remote_conn.recv(MAX_BUFFER).decode('utf-8', 'ignore')
-        else:
-            i = 0
-            while i <= 10:
-                # Send a newline if no data is present
-                self.write_channel(u'\n')
-                time.sleep(.5)
-                if self.remote_conn.recv_ready():
-                    return self.remote_conn.recv(MAX_BUFFER).decode('utf-8', 'ignore')
-                else:
-                    i += 1
-            return ""
+        # Strip any initial data (wait for a bit if no data)
+        i = 0
+        while True
+            output = self.read_channel()
+            if output:
+                return output
+            self.write_channel(u'\n')
+            if i >= 10:
+                break
+            i += 1
+            time.sleep(.5)
+        return u''
 
     def select_delay_factor(self, delay_factor):
         '''
@@ -279,13 +293,11 @@ class BaseSSHConnection(object):
         else:
             return self.global_delay_factor
 
-
     def special_login_handler(self, delay_factor=.5):
         '''
         Special handler for devices like WLC, Avaya ERS that throw up characters prior to login
         '''
         pass
-
 
     def disable_paging(self, command="terminal length 0\n", delay_factor=.5):
         '''
@@ -296,12 +308,10 @@ class BaseSSHConnection(object):
         time.sleep(1 * delay_factor)
 
         # Clear the buffer on the screen
-        output = self.remote_conn.recv(MAX_BUFFER).decode('utf-8', 'ignore')
+        output = self.read_channel()
         if self.ansi_escape_codes:
             output = self.strip_ansi_escape_codes(output)
-
         return output
-
 
     def wait_for_recv_ready(self, delay_factor=.5, max_loops=10):
         '''
@@ -339,7 +349,7 @@ class BaseSSHConnection(object):
         self.clear_buffer()
         self.write_channel(u"\n")
         self.wait_for_recv_ready(delay_factor)
-        prompt = self.remote_conn.recv(MAX_BUFFER).decode('utf-8', 'ignore')
+        prompt = self.read_channel()
 
         # Some platforms have ANSI escape codes
         if self.ansi_escape_codes:
@@ -381,7 +391,7 @@ class BaseSSHConnection(object):
         self.write_channel(u"\n")
         time.sleep(1 * delay_factor)
 
-        prompt = self.remote_conn.recv(MAX_BUFFER).decode('utf-8', 'ignore')
+        prompt = self.read_channel()
 
         # Some platforms have ANSI escape codes
         if self.ansi_escape_codes:
@@ -397,12 +407,10 @@ class BaseSSHConnection(object):
         return prompt
 
     def clear_buffer(self):
-        '''
-        Read any data available in the channel up to MAX_BUFFER
-        '''
-
-        if self.remote_conn.recv_ready():
-            return self.remote_conn.recv(MAX_BUFFER).decode('utf-8', 'ignore')
+        '''Read any data available in the channel up to MAX_BUFFER'''
+        read_buffer = self.read_channel()
+        if read_buffer:
+            return read_buffer
         else:
             return None
 
@@ -445,7 +453,7 @@ class BaseSSHConnection(object):
             i += 1
             # Keep reading data as long as available (up to max_loops)
             if self.remote_conn.recv_ready():
-                output += self.remote_conn.recv(MAX_BUFFER).decode('utf-8', 'ignore')
+                output += self.read_channel()
             else:
                 not_done = False
 
@@ -502,13 +510,13 @@ class BaseSSHConnection(object):
             # Find the current router prompt
             if self.remote_conn.recv_ready():
                 # Clear any existing data
-                self.remote_conn.recv(MAX_BUFFER).decode('utf-8', 'ignore')
+                self.read_channel()
             self.write_channel(u"\n")
             if self.remote_conn.recv_ready():
-                prompt = self.remote_conn.recv(MAX_BUFFER).decode('utf-8', 'ignore')
+                prompt = self.read_channel()
             else:
                 time.sleep(delay_factor * 1)
-                prompt = self.remote_conn.recv(MAX_BUFFER).decode('utf-8', 'ignore')
+                prompt = self.read_channel()
             if self.ansi_escape_codes:
                 prompt = self.strip_ansi_escape_codes(prompt)
             prompt = self.normalize_linefeeds(prompt)
@@ -533,7 +541,7 @@ class BaseSSHConnection(object):
             if self.remote_conn.recv_ready():
                 if debug:
                     print("recv_ready = True")
-                output += self.remote_conn.recv(MAX_BUFFER).decode('utf-8', 'ignore')
+                output += self.read_channel()
                 if re.search(search_pattern, output):
                     break
             else:

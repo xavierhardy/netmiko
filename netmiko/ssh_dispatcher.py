@@ -30,7 +30,6 @@ from netmiko.dell import DellForce10SSH
 # The keys of this dictionary are the supported device_types
 CLASS_MAPPER_BASE = {
     'cisco_ios': CiscoIosSSH,
-    'cisco_ios_telnet': CiscoIosSSH,
     'cisco_xe': CiscoIosSSH,
     'cisco_asa': CiscoAsaSSH,
     'cisco_nxos': CiscoNxosSSH,
@@ -63,7 +62,9 @@ new_mapper = {}
 for k, v in CLASS_MAPPER_BASE.items():
     new_mapper[k] = v
     alt_key = k + u"_ssh"
+    alt_key_telnet = k + u"_telnet"
     new_mapper[alt_key] = v
+    new_mapper[alt_key_telnet] = v
 CLASS_MAPPER = new_mapper
 
 platforms = list(CLASS_MAPPER.keys())
