@@ -92,15 +92,6 @@ class BaseSSHConnection(object):
         else:
             raise ValueError("Invalid protocol specified")
 
-    def check_recv(self):
-        '''Generic handler that checks whether data is available for SSH and telnet'''
-        if self.protocol == 'ssh':
-            return self.remote_conn.recv_ready()
-        elif self.protocol == 'telnet':
-            pass
-        else:
-            raise ValueError("Invalid protocol specified")
-
     def session_preparation(self):
         '''
         Prepare the session after the connection has been established
@@ -327,7 +318,6 @@ class BaseSSHConnection(object):
             time.sleep(1 * delay_factor)
             i += 1
 
-
     def set_base_prompt(self, pri_prompt_terminator='#',
                         alt_prompt_terminator='>', delay_factor=.5):
         '''
@@ -432,7 +422,7 @@ class BaseSSHConnection(object):
             print('In send_command')
 
         delay_factor = self.select_delay_factor(delay_factor)
-        output = ''
+        output = u''
         self.clear_buffer()
 
         # Ensure there is a newline at the end of the command
@@ -441,21 +431,19 @@ class BaseSSHConnection(object):
 
         if debug:
             print("Command is: {0}".format(command_string))
-
         self.write_channel(command_string)
-
         time.sleep(1 * delay_factor)
-        not_done = True
-        i = 1
 
-        while (not_done) and (i <= max_loops):
+        # Keep reading data as long as available (up to max_loops)
+        i = 1
+        while i <= max_loops:
             time.sleep(1 * delay_factor)
-            i += 1
-            # Keep reading data as long as available (up to max_loops)
-            if self.remote_conn.recv_ready():
-                output += self.read_channel()
+            new_output = self.read_channel()
+            if new_output:
+                output += new_output
             else:
-                not_done = False
+                break
+            i += 1
 
         # Some platforms have ansi_escape codes
         if self.ansi_escape_codes:
@@ -507,14 +495,12 @@ class BaseSSHConnection(object):
         command_string += '\n'
 
         if expect_string is None:
+            # Clear any existing data
+            self.read_channel()
             # Find the current router prompt
-            if self.remote_conn.recv_ready():
-                # Clear any existing data
-                self.read_channel()
             self.write_channel(u"\n")
-            if self.remote_conn.recv_ready():
-                prompt = self.read_channel()
-            else:
+            prompt = self.read_channel()
+            if not prompt:
                 time.sleep(delay_factor * 1)
                 prompt = self.read_channel()
             if self.ansi_escape_codes:
@@ -538,16 +524,13 @@ class BaseSSHConnection(object):
         while i <= max_loops:
             if debug:
                 print("In while loop")
-            if self.remote_conn.recv_ready():
+            new_output = self.read_channel()
+            output += new_output
+            if re.search(search_pattern, output):
+                break
+            if not new_output:
                 if debug:
-                    print("recv_ready = True")
-                output += self.read_channel()
-                if re.search(search_pattern, output):
-                    break
-            else:
-                if debug:
-                    print("recv_ready = False")
-                # No data, wait a little bit
+                    print("No data: sleeping")
                 time.sleep(delay_factor * 1)
             i += 1
         else:   # nobreak
