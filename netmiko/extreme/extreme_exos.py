@@ -2,6 +2,8 @@
 from __future__ import unicode_literals
 import time
 import re
+from select import select
+
 from netmiko.cisco_base_connection import CiscoSSHConnection
 
 
@@ -16,7 +18,7 @@ class ExtremeBase(CiscoSSHConnection):
         self.disable_paging(command="disable clipaging")
         self.send_command_timing("disable cli prompting")
         # Clear the read buffer
-        time.sleep(.3 * self.global_delay_factor)
+        select([self.remote_conn], [], [], .3 * self.global_delay_factor)
         self.clear_buffer()
 
     def set_base_prompt(self, *args, **kwargs):

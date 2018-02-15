@@ -3,6 +3,8 @@ from __future__ import print_function
 from __future__ import unicode_literals
 import re
 import time
+from select import select
+
 from netmiko.cisco_base_connection import CiscoSSHConnection
 
 
@@ -13,7 +15,7 @@ class AlcatelSrosSSH(CiscoSSHConnection):
         self.set_base_prompt()
         self.disable_paging(command="environment no more")
         # Clear the read buffer
-        time.sleep(.3 * self.global_delay_factor)
+        select([self.remote_conn], [], [], .3 * self.global_delay_factor)
         self.clear_buffer()
 
     def set_base_prompt(self, *args, **kwargs):

@@ -19,10 +19,12 @@ import io
 from os import path
 from threading import Lock
 
+from select import select
+
 from netmiko.netmiko_globals import MAX_BUFFER, BACKSPACE_CHAR
 from netmiko.ssh_exception import NetMikoTimeoutException, NetMikoAuthenticationException
 from netmiko.utilities import write_bytes, check_serial_port, get_structured_data
-from netmiko.py23_compat import string_types
+from netmiko.py23_compat import string_types, PY3
 from netmiko import log
 import serial
 
@@ -223,12 +225,18 @@ class BaseConnection(object):
         :param start: Initial start time to measure the session timeout
         :type start: float (from time.time() call i.e. epoch time)
         """
-        if not start:
-            start = time.time()
-        # Wait here until the SSH channel lock is acquired or until session_timeout exceeded
-        while (not self._session_locker.acquire(False) and
-               not self._timeout_exceeded(start, 'The netmiko channel is not available!')):
-                time.sleep(.1)
+        message = 'The netmiko channel is not available!'
+        if PY3:
+            acquired = self._session_locker.acquire(timeout=self.session_timeout)
+            if not acquired:
+                raise NetMikoTimeoutException(message)
+        else:
+            if not start:
+                start = time.time()
+            # Wait here until the SSH channel lock is acquired or until session_timeout exceeded
+            while (not self._session_locker.acquire(False) and
+                   not self._timeout_exceeded(start, message)):
+                    select([self.remote_conn], [], [], .1)
         return True
 
     def _unlock_netmiko_session(self):
@@ -304,14 +312,12 @@ class BaseConnection(object):
         """Generic handler that will read all the data from an SSH or telnet channel."""
         if self.protocol == 'ssh':
             output = ""
-            while True:
-                if self.remote_conn.recv_ready():
-                    outbuf = self.remote_conn.recv(MAX_BUFFER)
-                    if len(outbuf) == 0:
-                        raise EOFError("Channel stream closed by remote device.")
-                    output += outbuf.decode('utf-8', 'ignore')
-                else:
-                    break
+            outbuf = True
+            while self.remote_conn.recv_ready() and outbuf:
+                outbuf = self.remote_conn.recv(MAX_BUFFER)
+                output += outbuf.decode('utf-8', 'ignore')
+            if not outbuf:
+                raise EOFError("Channel stream closed by remote device.")
         elif self.protocol == 'telnet':
             output = self.remote_conn.read_very_eager().decode('utf-8', 'ignore')
         elif self.protocol == 'serial':
@@ -389,7 +395,7 @@ class BaseConnection(object):
             if re.search(pattern, output, flags=re_flags):
                 log.debug("Pattern found: {} {}".format(pattern, output))
                 return output
-            time.sleep(loop_delay * self.global_delay_factor)
+            select([self.remote_conn], [], [], loop_delay * self.global_delay_factor)
             i += 1
         raise NetMikoTimeoutException("Timed-out reading channel, pattern not found in output: {}"
                                       .format(pattern))
@@ -414,30 +420,16 @@ class BaseConnection(object):
         """
         # Time to delay in each read loop
         loop_delay = .1
-        final_delay = 2
 
         # Default to making loop time be roughly equivalent to self.timeout (support old max_loops
         # and delay_factor arguments for backwards compatibility).
         delay_factor = self.select_delay_factor(delay_factor)
-        if delay_factor == 1 and max_loops == 150:
-            max_loops = int(self.timeout / loop_delay)
-
+        start = time.time()
         channel_data = ""
-        i = 0
-        while i <= max_loops:
-            time.sleep(loop_delay * delay_factor)
+        while time.time() - start < self.timeout and select([self.remote_conn], [], [], loop_delay * delay_factor)[0]:
             new_data = self.read_channel()
-            if new_data:
-                channel_data += new_data
-            else:
-                # Safeguard to make sure really done
-                time.sleep(final_delay * delay_factor)
-                new_data = self.read_channel()
-                if not new_data:
-                    break
-                else:
-                    channel_data += new_data
-            i += 1
+            channel_data += new_data
+
         return channel_data
 
     def read_until_prompt(self, *args, **kwargs):
@@ -477,7 +469,7 @@ class BaseConnection(object):
                      delay_factor=1, max_loops=20):
         """Telnet login. Can be username/password or just password."""
         delay_factor = self.select_delay_factor(delay_factor)
-        time.sleep(1 * delay_factor)
+        select([self.remote_conn], [], [], 1 * delay_factor)
 
         output = ''
         return_msg = ''
@@ -490,14 +482,14 @@ class BaseConnection(object):
                 # Search for username pattern / send username
                 if re.search(username_pattern, output):
                     self.write_channel(self.username + self.TELNET_RETURN)
-                    time.sleep(1 * delay_factor)
+                    select([self.remote_conn], [], [], 1 * delay_factor)
                     output = self.read_channel()
                     return_msg += output
 
                 # Search for password pattern / send password
                 if re.search(pwd_pattern, output):
                     self.write_channel(self.password + self.TELNET_RETURN)
-                    time.sleep(.5 * delay_factor)
+                    select([self.remote_conn], [], [], .5 * delay_factor)
                     output = self.read_channel()
                     return_msg += output
                     if (re.search(pri_prompt_terminator, output, flags=re.M)
@@ -510,7 +502,7 @@ class BaseConnection(object):
                     return return_msg
 
                 self.write_channel(self.TELNET_RETURN)
-                time.sleep(.5 * delay_factor)
+                select([self.remote_conn], [], [], .5 * delay_factor)
                 i += 1
             except EOFError:
                 msg = "Telnet login failed: {}".format(self.host)
@@ -518,7 +510,7 @@ class BaseConnection(object):
 
         # Last try to see if we already logged in
         self.write_channel(self.TELNET_RETURN)
-        time.sleep(.5 * delay_factor)
+        select([self.remote_conn], [], [], .5 * delay_factor)
         output = self.read_channel()
         return_msg += output
         if (re.search(pri_prompt_terminator, output, flags=re.M)
@@ -548,7 +540,7 @@ class BaseConnection(object):
         self.set_terminal_width()
 
         # Clear the read buffer
-        time.sleep(.3 * self.global_delay_factor)
+        select([self.remote_conn], [], [], 0.3 * self.global_delay_factor)
         self.clear_buffer()
 
     def _use_ssh_config(self, dict_arg):
@@ -678,36 +670,21 @@ class BaseConnection(object):
 
     def _test_channel_read(self, count=40, pattern=""):
         """Try to read the channel (generally post login) verify you receive data back."""
-        def _increment_delay(main_delay, increment=1.1, maximum=8):
-            """Increment sleep time to a maximum value."""
-            main_delay = main_delay * increment
-            if main_delay >= maximum:
-                main_delay = maximum
-            return main_delay
-
-        i = 0
+        regex = re.compile(pattern) if pattern else None
         delay_factor = self.select_delay_factor(delay_factor=0)
         main_delay = delay_factor * .1
-        time.sleep(main_delay * 10)
-        new_data = ""
-        while i <= count:
-            new_data += self._read_channel_timing()
-            if new_data and pattern:
-                if re.search(pattern, new_data):
-                    break
-            elif new_data:
-                break
-            else:
-                self.write_channel(self.RETURN)
-            main_delay = _increment_delay(main_delay)
-            time.sleep(main_delay)
-            i += 1
+        timeout = main_delay*10+sum(max(1.1**i, 8) for i in range(count))
+        start = time.time()
+        new_data = self._read_channel_timing()
+        while not new_data or (new_data and regex and regex.search(new_data) is None) and time.time() - start < timeout:
+            self.write_channel(self.RETURN)
+            new_data = self._read_channel_timing()
 
         # check if data was ever present
         if new_data:
             return ""
-        else:
-            raise NetMikoTimeoutException("Timed out waiting for data")
+
+        raise NetMikoTimeoutException("Timed out waiting for data")
 
     def _build_ssh_client(self):
         """Prepare for Paramiko SSH connection."""
@@ -738,7 +715,7 @@ class BaseConnection(object):
     def disable_paging(self, command="terminal length 0", delay_factor=1):
         """Disable paging default to a Cisco CLI method."""
         delay_factor = self.select_delay_factor(delay_factor)
-        time.sleep(delay_factor * .1)
+        select([self.remote_conn], [], [], delay_factor * .1)
         self.clear_buffer()
         command = self.normalize_cmd(command)
         log.debug("In disable_paging")
@@ -793,7 +770,7 @@ class BaseConnection(object):
         delay_factor = self.select_delay_factor(delay_factor)
         self.clear_buffer()
         self.write_channel(self.RETURN)
-        time.sleep(delay_factor * .1)
+        select([self.remote_conn], [], [], delay_factor * .1)
 
         # Initial attempt to get prompt
         prompt = self.read_channel()
@@ -801,17 +778,15 @@ class BaseConnection(object):
             prompt = self.strip_ansi_escape_codes(prompt)
 
         # Check if the only thing you received was a newline
-        count = 0
+        timeout = 11 * delay_factor * .1
         prompt = prompt.strip()
-        while count <= 10 and not prompt:
+        start = time.time()
+        while time.time() - start < timeout and select([self.remote_conn], [], [], delay_factor * .1)[0] and not prompt:
             prompt = self.read_channel().strip()
-            if prompt:
-                if self.ansi_escape_codes:
-                    prompt = self.strip_ansi_escape_codes(prompt).strip()
-            else:
-                self.write_channel(self.RETURN)
-                time.sleep(delay_factor * .1)
-            count += 1
+            self.write_channel(self.RETURN)
+
+        if self.ansi_escape_codes:
+            prompt = self.strip_ansi_escape_codes(prompt).strip()
 
         # If multiple lines in the output take the last line
         prompt = self.normalize_linefeeds(prompt)
@@ -819,7 +794,7 @@ class BaseConnection(object):
         prompt = prompt.strip()
         if not prompt:
             raise ValueError("Unable to find prompt: {}".format(prompt))
-        time.sleep(delay_factor * .1)
+        select([self.remote_conn], [], [], delay_factor * .1)
         self.clear_buffer()
         return prompt
 
@@ -934,35 +909,32 @@ class BaseConnection(object):
         if normalize:
             command_string = self.normalize_cmd(command_string)
 
-        time.sleep(delay_factor * loop_delay)
+        search_regex = re.compile(search_pattern)
+        regex_w_backspace = re.compile(search_pattern + r'.*$')
+        select([self.remote_conn], [], [], delay_factor * loop_delay)
         self.clear_buffer()
         self.write_channel(command_string)
 
-        i = 1
         output = ''
+        timeout = delay_factor * loop_delay * max_loops
+        start = time.time()
         # Keep reading data until search_pattern is found or until max_loops is reached.
-        while i <= max_loops:
+        while not search_regex.search(output) and time.time() - start < timeout:
             new_data = self.read_channel()
+
             if new_data:
                 output += new_data
-                try:
-                    lines = output.split(self.RETURN)
+                lines = output.split(self.RETURN)
+                if lines:
                     first_line = lines[0]
                     # First line is the echo line containing the command. In certain situations
                     # it gets repainted and needs filtered
                     if BACKSPACE_CHAR in first_line:
-                        pattern = search_pattern + r'.*$'
-                        first_line = re.sub(pattern, repl='', string=first_line)
+                        first_line = regex_w_backspace.sub(repl='', string=first_line)
                         lines[0] = first_line
                         output = self.RETURN.join(lines)
-                except IndexError:
-                    pass
-                if re.search(search_pattern, output):
-                    break
-            else:
-                time.sleep(delay_factor * loop_delay)
-            i += 1
-        else:   # nobreak
+
+        if not search_regex.search(output):
             raise IOError("Search pattern never detected in send_command_expect: {}".format(
                 search_pattern))
 
@@ -1123,7 +1095,7 @@ class BaseConnection(object):
         output = self.config_mode(*cfg_mode_args)
         for cmd in config_commands:
             self.write_channel(self.normalize_cmd(cmd))
-            time.sleep(delay_factor * .5)
+            select([self.remote_conn], [], [], delay_factor * .5)
 
         # Gather output
         output += self._read_channel_timing(delay_factor=delay_factor, max_loops=max_loops)

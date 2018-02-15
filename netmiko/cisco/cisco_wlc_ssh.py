@@ -3,6 +3,7 @@ from __future__ import print_function
 from __future__ import unicode_literals
 import time
 import re
+from select import select
 
 from netmiko.base_connection import BaseConnection
 from netmiko.py23_compat import string_types
@@ -25,7 +26,7 @@ class CiscoWlcSSH(BaseConnection):
         """
         delay_factor = self.select_delay_factor(delay_factor)
         i = 0
-        time.sleep(delay_factor * .5)
+        select([self.remote_conn], [], [], delay_factor * .5)
         output = ""
         while i <= 12:
             output = self.read_channel()
@@ -35,10 +36,10 @@ class CiscoWlcSSH(BaseConnection):
                 elif 'Password' in output:
                     self.write_channel(self.password + self.RETURN)
                     break
-                time.sleep(delay_factor * 1)
+                select([self.remote_conn], [], [], delay_factor * 1)
             else:
                 self.write_channel(self.RETURN)
-                time.sleep(delay_factor * 1.5)
+                select([self.remote_conn], [], [], delay_factor * 1.5)
             i += 1
 
     def send_command_w_enter(self, *args, **kwargs):
@@ -73,11 +74,11 @@ class CiscoWlcSSH(BaseConnection):
             if '802.11b Advanced Configuration' in output:
 
                 # Defaults to 30 seconds
-                time.sleep(kwargs['delay_factor'] * 30)
+                select([self.remote_conn], [], [], kwargs['delay_factor'] * 30)
                 not_done = True
                 i = 1
                 while not_done and i <= 150:
-                    time.sleep(kwargs['delay_factor'] * 3)
+                    select([self.remote_conn], [], [], kwargs['delay_factor'] * 3)
                     i += 1
                     new_data = ""
                     new_data = self.read_channel()
@@ -103,7 +104,7 @@ class CiscoWlcSSH(BaseConnection):
         self.set_base_prompt()
         self.disable_paging(command="config paging disable")
         # Clear the read buffer
-        time.sleep(.3 * self.global_delay_factor)
+        select([self.remote_conn], [], [], .3 * self.global_delay_factor)
         self.clear_buffer()
 
     def cleanup(self):
@@ -151,7 +152,7 @@ class CiscoWlcSSH(BaseConnection):
         # Send config commands
         for cmd in config_commands:
             self.write_channel(self.normalize_cmd(cmd))
-            time.sleep(delay_factor * .5)
+            select([self.remote_conn], [], [], delay_factor * .5)
 
         # Gather output
         output = self._read_channel_timing(delay_factor=delay_factor, max_loops=max_loops)

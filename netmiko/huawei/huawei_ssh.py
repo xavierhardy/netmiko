@@ -2,6 +2,8 @@ from __future__ import print_function
 from __future__ import unicode_literals
 import time
 import re
+from select import select
+
 from netmiko.cisco_base_connection import CiscoSSHConnection
 from netmiko import log
 
@@ -14,7 +16,7 @@ class HuaweiSSH(CiscoSSHConnection):
         self.set_base_prompt()
         self.disable_paging(command="screen-length 0 temporary")
         # Clear the read buffer
-        time.sleep(.3 * self.global_delay_factor)
+        select([self.remote_conn], [], [], .3 * self.global_delay_factor)
         self.clear_buffer()
 
     def config_mode(self, config_command='system-view'):
@@ -57,7 +59,7 @@ class HuaweiSSH(CiscoSSHConnection):
         delay_factor = self.select_delay_factor(delay_factor)
         self.clear_buffer()
         self.write_channel(self.RETURN)
-        time.sleep(.5 * delay_factor)
+        select([self.remote_conn], [], [], .5 * delay_factor)
 
         prompt = self.read_channel()
         prompt = self.normalize_linefeeds(prompt)

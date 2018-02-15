@@ -12,7 +12,7 @@ class CienaSaosSSH(CiscoSSHConnection):
         self.set_base_prompt()
         self.disable_paging(command="system shell session set more off")
         # Clear the read buffer
-        time.sleep(.3 * self.global_delay_factor)
+        select([self.remote_conn], [], [], .3 * self.global_delay_factor)
         self.clear_buffer()
 
     def enable(self, *args, **kwargs):

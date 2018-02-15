@@ -2,6 +2,8 @@
 from __future__ import print_function
 from __future__ import unicode_literals
 import time
+from select import select
+
 from netmiko.cisco_base_connection import CiscoSSHConnection
 
 # Avaya presents Enter Ctrl-Y to begin.
@@ -31,10 +33,10 @@ class AvayaErsSSH(CiscoSSHConnection):
                 elif 'ssword' in output:
                     self.write_channel(self.password + self.RETURN)
                     break
-                time.sleep(.5 * delay_factor)
+                select([self.remote_conn], [], [], .5 * delay_factor)
             else:
                 self.write_channel(self.RETURN)
-                time.sleep(1 * delay_factor)
+                select([self.remote_conn], [], [], 1 * delay_factor)
             i += 1
 
     def save_config(self, cmd='save config', confirm=False):

@@ -3,6 +3,8 @@ from __future__ import unicode_literals
 import re
 import time
 import socket
+from select import select
+
 from netmiko.cisco_base_connection import CiscoSSHConnection
 from netmiko import log
 
@@ -23,7 +25,7 @@ class HPProcurveSSH(CiscoSSHConnection):
                 self.write_channel(self.RETURN)
                 break
             else:
-                time.sleep(.33 * delay_factor)
+                select([self.remote_conn], [], [], .33 * delay_factor)
             count += 1
 
         # Try one last time to past "Press any key to continue
@@ -38,7 +40,7 @@ class HPProcurveSSH(CiscoSSHConnection):
         self.disable_paging(command=command)
         self.set_terminal_width(command='terminal width 511')
         # Clear the read buffer
-        time.sleep(.3 * self.global_delay_factor)
+        select([self.remote_conn], [], [], .3 * self.global_delay_factor)
         self.clear_buffer()
 
     def enable(self, cmd='enable', pattern='password', re_flags=re.IGNORECASE,
@@ -60,7 +62,7 @@ class HPProcurveSSH(CiscoSSHConnection):
         self.write_channel("logout" + self.RETURN)
         count = 0
         while count <= 5:
-            time.sleep(.5)
+            select([self.remote_conn], [], [], .5)
             output = self.read_channel()
             if 'Do you want to log out' in output:
                 self.write_channel("y" + self.RETURN)

@@ -1,6 +1,8 @@
 from __future__ import print_function
 from __future__ import unicode_literals
 import time
+from select import select
+
 from netmiko.cisco_base_connection import CiscoSSHConnection
 
 
@@ -16,18 +18,18 @@ class HPComwareSSH(CiscoSSHConnection):
         while i <= 4:
             # Comware can have a banner that prompts you to continue
             # 'Press Y or ENTER to continue, N to exit.'
-            time.sleep(.5 * delay_factor)
+            select([self.remote_conn], [], [], .5 * delay_factor)
             self.write_channel("\n")
             i += 1
 
-        time.sleep(.3 * delay_factor)
+        select([self.remote_conn], [], [], .3 * delay_factor)
         self.clear_buffer()
         self._test_channel_read(pattern=r'[>\]]')
         self.set_base_prompt()
         command = self.RETURN + "screen-length disable"
         self.disable_paging(command=command)
         # Clear the read buffer
-        time.sleep(.3 * self.global_delay_factor)
+        select([self.remote_conn], [], [], .3 * self.global_delay_factor)
         self.clear_buffer()
 
     def config_mode(self, config_command='system-view'):

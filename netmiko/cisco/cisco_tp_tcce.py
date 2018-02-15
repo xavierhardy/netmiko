@@ -8,6 +8,8 @@ Written by Ahmad Barrin
 from __future__ import unicode_literals
 import time
 import re
+from select import select
+
 from netmiko.cisco_base_connection import CiscoSSHConnection
 
 
@@ -38,7 +40,7 @@ class CiscoTpTcCeSSH(CiscoSSHConnection):
         self.disable_paging()
         self.set_terminal_width()
         # Clear the read buffer
-        time.sleep(.3 * self.global_delay_factor)
+        select([self.remote_conn], [], [], .3 * self.global_delay_factor)
         self.clear_buffer()
 
     def set_base_prompt(self, *args, **kwargs):

@@ -3,6 +3,7 @@ from __future__ import unicode_literals
 import re
 import time
 import os
+from select import select
 
 from netmiko.base_connection import BaseConnection
 from netmiko.scp_handler import BaseFileTransfer, SCPConn
@@ -28,7 +29,7 @@ class JuniperSSH(BaseConnection):
         self.disable_paging(command="set cli screen-length 0")
         self.set_terminal_width(command='set cli screen-width 511')
         # Clear the read buffer
-        time.sleep(.3 * self.global_delay_factor)
+        select([self.remote_conn], [], [], .3 * self.global_delay_factor)
         self.clear_buffer()
 
     def enter_cli_mode(self):
@@ -38,11 +39,11 @@ class JuniperSSH(BaseConnection):
         cur_prompt = ''
         while count < 50:
             self.write_channel(self.RETURN)
-            time.sleep(.1 * delay_factor)
+            select([self.remote_conn], [], [], .1 * delay_factor)
             cur_prompt = self.read_channel()
             if re.search(r'root@', cur_prompt) or re.search(r"^%$", cur_prompt.strip()):
                 self.write_channel("cli" + self.RETURN)
-                time.sleep(.3 * delay_factor)
+                select([self.remote_conn], [], [], .3 * delay_factor)
                 self.clear_buffer()
                 break
             elif '>' in cur_prompt or '#' in cur_prompt:

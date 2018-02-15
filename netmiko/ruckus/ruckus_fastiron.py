@@ -1,6 +1,8 @@
 from __future__ import unicode_literals
 import re
 import time
+from select import select
+
 from netmiko.cisco_base_connection import CiscoSSHConnection
 
 
@@ -13,7 +15,7 @@ class RuckusFastironBase(CiscoSSHConnection):
         self.enable()
         self.disable_paging(command="skip-page-display")
         # Clear the read buffer
-        time.sleep(.3 * self.global_delay_factor)
+        select([self.remote_conn], [], [], .3 * self.global_delay_factor)
         self.clear_buffer()
 
     def enable(self, cmd='enable', pattern=r'(ssword|User Name)', re_flags=re.IGNORECASE):
@@ -40,7 +42,7 @@ class RuckusFastironBase(CiscoSSHConnection):
                     self.write_channel(self.normalize_cmd(self.secret))
                     output += self.read_until_prompt()
                     return output
-                time.sleep(1)
+                select([self.remote_conn], [], [], 1)
                 i += 1
 
         if not self.check_enable_mode():

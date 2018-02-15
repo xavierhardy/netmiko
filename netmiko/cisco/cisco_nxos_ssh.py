@@ -3,6 +3,8 @@ from __future__ import unicode_literals
 import re
 import time
 import os
+from select import select
+
 from netmiko.cisco_base_connection import CiscoSSHConnection
 from netmiko.cisco_base_connection import CiscoFileTransfer
 
@@ -16,7 +18,7 @@ class CiscoNxosSSH(CiscoSSHConnection):
         self.set_base_prompt()
         self.disable_paging()
         # Clear the read buffer
-        time.sleep(.3 * self.global_delay_factor)
+        select([self.remote_conn], [], [], .3 * self.global_delay_factor)
         self.clear_buffer()
 
     def normalize_linefeeds(self, a_string):

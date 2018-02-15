@@ -22,7 +22,7 @@ class PaloAltoPanosSSH(BaseConnection):
         self.set_base_prompt(delay_factor=20)
         self.disable_paging(command="set cli pager off")
         # Clear the read buffer
-        time.sleep(.3 * self.global_delay_factor)
+        select([self.remote_conn], [], [], .3 * self.global_delay_factor)
         self.clear_buffer()
 
     def check_enable_mode(self, *args, **kwargs):

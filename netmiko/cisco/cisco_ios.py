@@ -5,6 +5,7 @@ import re
 import os
 import hashlib
 import io
+from select import select
 
 from netmiko.cisco_base_connection import CiscoBaseConnection, CiscoFileTransfer
 
@@ -18,7 +19,7 @@ class CiscoIosBase(CiscoBaseConnection):
         self.disable_paging()
         self.set_terminal_width(command='terminal width 511')
         # Clear the read buffer
-        time.sleep(.3 * self.global_delay_factor)
+        select([self.remote_conn], [], [], .3 * self.global_delay_factor)
         self.clear_buffer()
 
     def save_config(self, cmd='write mem', confirm=False):
@@ -116,11 +117,11 @@ class InLineTransfer(CiscoIosFileTransfer):
     def _exit_tcl_mode(self):
         TCL_EXIT = 'tclquit'
         self.ssh_ctl_chan.write_channel("\r")
-        time.sleep(1)
+        select([self.remote_conn], [], [], 1)
         output = self.ssh_ctl_chan.read_channel()
         if '(tcl)' in output:
             self.ssh_ctl_chan.write_channel(TCL_EXIT + "\r")
-        time.sleep(1)
+        select([self.remote_conn], [], [], 1)
         output += self.ssh_ctl_chan.read_channel()
         return output
 
@@ -162,7 +163,7 @@ class InLineTransfer(CiscoIosFileTransfer):
         self.ssh_ctl_chan.clear_buffer()
 
         self.ssh_ctl_chan.write_channel(TCL_FILECMD_ENTER)
-        time.sleep(.25)
+        select([self.remote_conn], [], [], .25)
         self.ssh_ctl_chan.write_channel(file_contents)
         self.ssh_ctl_chan.write_channel(TCL_FILECMD_EXIT + "\r")
 
@@ -177,7 +178,7 @@ class InLineTransfer(CiscoIosFileTransfer):
             sleep_time = 25
 
         # Initial delay
-        time.sleep(sleep_time)
+        select([self.remote_conn], [], [], sleep_time)
 
         # File paste and TCL_FILECMD_exit should be indicated by "router(tcl)#"
         output = self.ssh_ctl_chan._read_channel_expect(pattern=r"\(tcl\)", max_loops=max_loops)
@@ -186,7 +187,7 @@ class InLineTransfer(CiscoIosFileTransfer):
         TCL_EXIT = 'tclquit'
         self.ssh_ctl_chan.write_channel(TCL_EXIT + "\r")
 
-        time.sleep(1)
+        select([self.remote_conn], [], [], 1)
         # Read all data remaining from the TCLSH session
         output += self.ssh_ctl_chan._read_channel_expect(max_loops=max_loops)
         return output

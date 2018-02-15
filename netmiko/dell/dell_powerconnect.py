@@ -1,5 +1,8 @@
 """Dell PowerConnect Driver."""
 from __future__ import unicode_literals
+
+from select import select
+
 from paramiko import SSHClient
 import time
 from os import path
@@ -21,7 +24,7 @@ class DellPowerConnectBase(CiscoSSHConnection):
         self.set_base_prompt()
         self.disable_paging(command="terminal datadump")
         # Clear the read buffer
-        time.sleep(.3 * self.global_delay_factor)
+        select([self.remote_conn], [], [], .3 * self.global_delay_factor)
         self.clear_buffer()
 
     def set_base_prompt(self, pri_prompt_terminator='>', alt_prompt_terminator='#',
@@ -82,7 +85,7 @@ class DellPowerConnectSSH(DellPowerConnectBase):
         """
         delay_factor = self.select_delay_factor(delay_factor)
         i = 0
-        time.sleep(delay_factor * .5)
+        select([self.remote_conn], [], [], delay_factor * .5)
         output = ""
         while i <= 12:
             output = self.read_channel()
@@ -92,10 +95,10 @@ class DellPowerConnectSSH(DellPowerConnectBase):
                 elif 'Password:' in output:
                     self.write_channel(self.password + self.RETURN)
                     break
-                time.sleep(delay_factor * 1)
+                select([self.remote_conn], [], [], delay_factor * 1)
             else:
                 self.write_channel(self.RETURN)
-                time.sleep(delay_factor * 1.5)
+                select([self.remote_conn], [], [], delay_factor * 1.5)
             i += 1
 
 
@@ -109,5 +112,5 @@ class DellPowerConnectTelnet(DellPowerConnectBase):
         self.disable_paging(command="terminal length 0")
         self.set_terminal_width()
         # Clear the read buffer
-        time.sleep(.3 * self.global_delay_factor)
+        select([self.remote_conn], [], [], .3 * self.global_delay_factor)
         self.clear_buffer()

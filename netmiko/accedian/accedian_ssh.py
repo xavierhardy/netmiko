@@ -8,7 +8,7 @@ class AccedianSSH(CiscoSSHConnection):
         self._test_channel_read()
         self.set_base_prompt()
         # Clear the read buffer
-        time.sleep(.3 * self.global_delay_factor)
+        select([self.remote_conn], [], [], .3 * self.global_delay_factor)
         self.clear_buffer()
 
     def check_enable_mode(self, *args, **kwargs):

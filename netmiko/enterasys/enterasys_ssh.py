@@ -1,6 +1,8 @@
 """Enterasys support."""
 from __future__ import unicode_literals
 import time
+from select import select
+
 from netmiko.cisco_base_connection import CiscoSSHConnection
 
 
@@ -12,7 +14,7 @@ class EnterasysSSH(CiscoSSHConnection):
         self.set_base_prompt()
         self.disable_paging(command="set length 0")
         # Clear the read buffer
-        time.sleep(.3 * self.global_delay_factor)
+        select([self.remote_conn], [], [], .3 * self.global_delay_factor)
         self.clear_buffer()
 
     def save_config(self, cmd='', confirm=True, confirm_response=''):

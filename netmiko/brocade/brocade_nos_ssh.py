@@ -1,6 +1,8 @@
 """Support for Brocade NOS/VDX."""
 from __future__ import unicode_literals
 import time
+from select import select
+
 from netmiko.cisco_base_connection import CiscoSSHConnection
 
 
@@ -18,7 +20,7 @@ class BrocadeNosSSH(CiscoSSHConnection):
         """Adding a delay after login."""
         delay_factor = self.select_delay_factor(delay_factor)
         self.write_channel(self.RETURN)
-        time.sleep(1 * delay_factor)
+        select([self.remote_conn], [], [], 1 * delay_factor)
 
     def save_config(self, cmd='copy running-config startup-config', confirm=True,
                     confirm_response='y'):

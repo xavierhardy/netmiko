@@ -42,6 +42,8 @@ from __future__ import unicode_literals
 
 import re
 import time
+from select import select
+
 from netmiko.ssh_dispatcher import ConnectHandler
 from netmiko.base_connection import BaseConnection
 
@@ -50,6 +52,12 @@ from netmiko.base_connection import BaseConnection
 # remaining keys indicate kwargs that will be passed to dispatch method.
 # Note, the 'cmd' needs to avoid output paging.
 SSH_MAPPER_BASE = {
+    'linux': {
+        "cmd": "uname -a",
+        "search_patterns": ["Ubuntu"],
+        "priority": 99,
+        "dispatch": "_autodetect_std",
+    },
     'alcatel_aos': {
         "cmd": "show system",
         "search_patterns": ["Alcatel-Lucent"],
@@ -211,7 +219,7 @@ class SSHDetect(object):
             The output from the command sent
         """
         self.connection.write_channel(cmd + "\n")
-        time.sleep(1)
+        select([self.connection.remote_conn], [], [], 1)
         output = self.connection._read_channel_timing()
         output = self.connection.strip_ansi_escape_codes(output)
         output = self.connection.strip_backspaces(output)

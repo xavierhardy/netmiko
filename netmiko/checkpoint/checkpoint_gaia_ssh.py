@@ -1,5 +1,7 @@
 from __future__ import unicode_literals
 import time
+from select import select
+
 from netmiko.base_connection import BaseConnection
 
 
@@ -18,7 +20,7 @@ class CheckPointGaiaSSH(BaseConnection):
         self.set_base_prompt()
         self.disable_paging(command="set clienv rows 0")
         # Clear the read buffer
-        time.sleep(.3 * self.global_delay_factor)
+        select([self.remote_conn], [], [], .3 * self.global_delay_factor)
         self.clear_buffer()
 
     def config_mode(self, config_command=''):

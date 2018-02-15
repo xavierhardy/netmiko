@@ -1,5 +1,7 @@
 from __future__ import unicode_literals
 import time
+from select import select
+
 from netmiko.base_connection import BaseConnection
 
 
@@ -22,6 +24,6 @@ class F5LtmSSH(BaseConnection):
         self.clear_buffer()
         command = "{}tmsh{}".format(self.RETURN, self.RETURN)
         self.write_channel(command)
-        time.sleep(1 * delay_factor)
+        select([self.remote_conn], [], [], 1 * delay_factor)
         self.clear_buffer()
         return None

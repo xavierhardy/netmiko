@@ -2,6 +2,8 @@
 from __future__ import print_function
 from __future__ import unicode_literals
 import time
+from select import select
+
 from netmiko.cisco_base_connection import CiscoSSHConnection
 
 
@@ -13,7 +15,7 @@ class AvayaVspSSH(CiscoSSHConnection):
         self.set_base_prompt()
         self.disable_paging(command="terminal more disable")
         # Clear the read buffer
-        time.sleep(.3 * self.global_delay_factor)
+        select([self.remote_conn], [], [], .3 * self.global_delay_factor)
         self.clear_buffer()
 
     def save_config(self, cmd='save config', confirm=False):

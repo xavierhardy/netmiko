@@ -3,6 +3,8 @@
 from __future__ import unicode_literals
 import re
 import time
+from select import select
+
 from netmiko.cisco_base_connection import CiscoSSHConnection, CiscoFileTransfer
 
 
@@ -19,7 +21,7 @@ class CiscoAsaSSH(CiscoSSHConnection):
         self.disable_paging(command="terminal pager 0")
         self.set_terminal_width(command="terminal width 511")
         # Clear the read buffer
-        time.sleep(.3 * self.global_delay_factor)
+        select([self.remote_conn], [], [], .3 * self.global_delay_factor)
         self.clear_buffer()
 
     def send_command_timing(self, *args, **kwargs):
@@ -91,7 +93,7 @@ class CiscoAsaSSH(CiscoSSHConnection):
         max_attempts = 50
         self.write_channel("login" + self.RETURN)
         while i <= max_attempts:
-            time.sleep(.5 * delay_factor)
+            select([self.remote_conn], [], [], .5 * delay_factor)
             output = self.read_channel()
             if 'sername' in output:
                 self.write_channel(self.username + self.RETURN)

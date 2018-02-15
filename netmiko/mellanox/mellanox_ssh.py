@@ -24,7 +24,7 @@ class MellanoxSSH(CiscoSSHConnection):
     def disable_paging(self, command="terminal length 999", delay_factor=1):
         """Disable paging default to a Cisco CLI method."""
         delay_factor = self.select_delay_factor(delay_factor)
-        time.sleep(delay_factor * .1)
+        select([self.remote_conn], [], [], delay_factor * .1)
         self.clear_buffer()
         command = self.normalize_cmd(command)
         log.debug("In disable_paging")

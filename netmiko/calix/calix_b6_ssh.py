@@ -2,6 +2,8 @@
 from __future__ import unicode_literals
 import time
 from os import path
+from select import select
+
 from paramiko import SSHClient
 from netmiko.cisco_base_connection import CiscoSSHConnection
 
@@ -25,7 +27,7 @@ class CalixB6SSH(CiscoSSHConnection):
         self.disable_paging()
         self.set_terminal_width(command="terminal width 511")
         # Clear the read buffer
-        time.sleep(.3 * self.global_delay_factor)
+        select([self.remote_conn], [], [], .3 * self.global_delay_factor)
         self.clear_buffer()
 
     def _build_ssh_client(self):
@@ -59,7 +61,7 @@ class CalixB6SSH(CiscoSSHConnection):
         """
         delay_factor = self.select_delay_factor(delay_factor)
         i = 0
-        time.sleep(delay_factor * .25)
+        select([self.remote_conn], [], [], delay_factor * .25)
         output = ""
         while i <= 12:
             output = self.read_channel()
@@ -69,10 +71,10 @@ class CalixB6SSH(CiscoSSHConnection):
                 elif 'Password:' in output:
                     self.write_channel(self.password + self.RETURN)
                     break
-                time.sleep(delay_factor * 0.5)
+                select([self.remote_conn], [], [], delay_factor * 0.5)
             else:
                 self.write_channel(self.RETURN)
-                time.sleep(delay_factor * 1)
+                select([self.remote_conn], [], [], delay_factor * 1)
             i += 1
 
     def check_config_mode(self, check_string=')#', pattern=''):

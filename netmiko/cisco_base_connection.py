@@ -1,5 +1,8 @@
 """CiscoBaseConnection is netmiko SSH class for Cisco and Cisco-like platforms."""
 from __future__ import unicode_literals
+
+from select import select
+
 from netmiko.base_connection import BaseConnection
 from netmiko.scp_handler import BaseFileTransfer
 from netmiko.ssh_exception import NetMikoAuthenticationException
@@ -68,7 +71,7 @@ class CiscoBaseConnection(BaseConnection):
                      delay_factor=1, max_loops=20):
         """Telnet login. Can be username/password or just password."""
         delay_factor = self.select_delay_factor(delay_factor)
-        time.sleep(1 * delay_factor)
+        select([self.remote_conn], [], [], 1 * delay_factor)
 
         output = ''
         return_msg = ''
@@ -81,14 +84,14 @@ class CiscoBaseConnection(BaseConnection):
                 # Search for username pattern / send username
                 if re.search(username_pattern, output):
                     self.write_channel(self.username + self.TELNET_RETURN)
-                    time.sleep(1 * delay_factor)
+                    select([self.remote_conn], [], [], 1 * delay_factor)
                     output = self.read_channel()
                     return_msg += output
 
                 # Search for password pattern / send password
                 if re.search(pwd_pattern, output):
                     self.write_channel(self.password + self.TELNET_RETURN)
-                    time.sleep(.5 * delay_factor)
+                    select([self.remote_conn], [], [], .5 * delay_factor)
                     output = self.read_channel()
                     return_msg += output
                     if (re.search(pri_prompt_terminator, output, flags=re.M)
@@ -98,7 +101,7 @@ class CiscoBaseConnection(BaseConnection):
                 # Support direct telnet through terminal server
                 if re.search(r"initial configuration dialog\? \[yes/no\]: ", output):
                     self.write_channel("no" + self.TELNET_RETURN)
-                    time.sleep(.5 * delay_factor)
+                    select([self.remote_conn], [], [], .5 * delay_factor)
                     count = 0
                     while count < 15:
                         output = self.read_channel()
@@ -106,7 +109,7 @@ class CiscoBaseConnection(BaseConnection):
                         if re.search(r"ress RETURN to get started", output):
                             output = ""
                             break
-                        time.sleep(2 * delay_factor)
+                        select([self.remote_conn], [], [], 2 * delay_factor)
                         count += 1
 
                 # Check for device with no password configured
@@ -121,7 +124,7 @@ class CiscoBaseConnection(BaseConnection):
                     return return_msg
 
                 self.write_channel(self.TELNET_RETURN)
-                time.sleep(.5 * delay_factor)
+                select([self.remote_conn], [], [], .5 * delay_factor)
                 i += 1
             except EOFError:
                 msg = "Telnet login failed: {}".format(self.host)
@@ -129,7 +132,7 @@ class CiscoBaseConnection(BaseConnection):
 
         # Last try to see if we already logged in
         self.write_channel(self.TELNET_RETURN)
-        time.sleep(.5 * delay_factor)
+        select([self.remote_conn], [], [], .5 * delay_factor)
         output = self.read_channel()
         return_msg += output
         if (re.search(pri_prompt_terminator, output, flags=re.M)

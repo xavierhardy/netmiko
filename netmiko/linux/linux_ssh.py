@@ -3,6 +3,7 @@ from __future__ import unicode_literals
 import re
 import socket
 import time
+from select import select
 
 from netmiko.cisco_base_connection import CiscoSSHConnection
 from netmiko.ssh_exception import NetMikoTimeoutException
@@ -56,7 +57,7 @@ class LinuxSSH(CiscoSSHConnection):
         output = ""
         if self.check_enable_mode():
             self.write_channel(self.normalize_cmd(exit_command))
-            time.sleep(.3 * delay_factor)
+            select([self.remote_conn], [], [], .3 * delay_factor)
             self.set_base_prompt()
             if self.check_enable_mode():
                 raise ValueError("Failed to exit enable mode.")
@@ -68,7 +69,7 @@ class LinuxSSH(CiscoSSHConnection):
         output = ""
         if not self.check_enable_mode():
             self.write_channel(self.normalize_cmd(cmd))
-            time.sleep(.3 * delay_factor)
+            select([self.remote_conn], [], [], .3 * delay_factor)
             try:
                 output += self.read_channel()
                 if re.search(pattern, output, flags=re_flags):
