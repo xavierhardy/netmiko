@@ -10,15 +10,18 @@ Also defines methods that should generally be supported by child classes
 from __future__ import print_function
 from __future__ import unicode_literals
 
-import paramiko
-import time
-import socket
-import re
 import io
+import re
+import socket
+import time
 from os import path
+from select import select
+
+import paramiko
 
 from netmiko.netmiko_globals import MAX_BUFFER, BACKSPACE_CHAR
-from netmiko.ssh_exception import NetMikoTimeoutException, NetMikoAuthenticationException
+from netmiko.ssh_exception import NetMikoTimeoutException, \
+    NetMikoAuthenticationException
 
 
 class BaseSSHConnection(object):
@@ -27,6 +30,8 @@ class BaseSSHConnection(object):
 
     Otherwise method left as a stub method.
     """
+    newline_regex = re.compile(r'(\r\r\r\n|\r\r\n|\r\n|\n\r)')
+
     def __init__(self, ip=u'', host=u'', username=u'', password=u'', secret=u'', port=22,
                  device_type=u'', verbose=False, global_delay_factor=.1, use_keys=False,
                  key_file=None, ssh_strict=False, system_host_keys=False, alt_host_keys=False,
@@ -102,7 +107,7 @@ class BaseSSHConnection(object):
         if source.get('proxycommand'):
             proxy = paramiko.ProxyCommand(source['proxycommand'])
         elif source.get('ProxyCommand'):
-            proxy = paramiko.ProxyCommand(source['proxycommand'])
+            proxy = paramiko.ProxyCommand(source['ProxyCommand'])
         else:
             proxy = None
 
@@ -195,17 +200,14 @@ class BaseSSHConnection(object):
         if verbose:
             print("Interactive SSH session established")
 
-        time.sleep(.1)
+        select([self.remote_conn], [], [], .1)
         if self.wait_for_recv_ready_newline():
             return self.remote_conn.recv(MAX_BUFFER).decode('utf-8', 'ignore')
         return ""
 
     def select_delay_factor(self, delay_factor):
         """Choose the greater of delay_factor or self.global_delay_factor."""
-        if delay_factor >= self.global_delay_factor:
-            return delay_factor
-        else:
-            return self.global_delay_factor
+        return max(delay_factor, self.global_delay_factor)
 
     def special_login_handler(self, delay_factor=.1):
         """Handler for devices like WLC, Avaya ERS that throw up characters prior to login."""
@@ -214,7 +216,7 @@ class BaseSSHConnection(object):
     def disable_paging(self, command="terminal length 0", delay_factor=.1):
         """Disable paging default to a Cisco CLI method."""
         debug = False
-        time.sleep(1 * delay_factor)
+        select([self.remote_conn], [], [], delay_factor)
         self.clear_buffer()
         command = self.normalize_cmd(command)
         if debug:
@@ -231,31 +233,24 @@ class BaseSSHConnection(object):
 
     def wait_for_recv_ready_newline(self, delay_factor=.1, max_loops=20):
         """Wait for data to be in the buffer so it can be received."""
-        i = 0
-        time.sleep(delay_factor)
-        while i <= max_loops:
-            if self.remote_conn.recv_ready():
-                return True
-            else:
-                self.remote_conn.sendall('\n')
-                delay_factor = delay_factor * 1.1
-                if delay_factor >= 8:
-                    delay_factor = 8
-                time.sleep(delay_factor)
-                i += 1
-        raise NetMikoTimeoutException("Timed out waiting for recv_ready")
+        timeout = delay_factor * (max_loops + 1)
+        start = time.time()
+        while time.time() - start <= timeout and not select([self.remote_conn], [], [], delay_factor)[0]:
+            self.remote_conn.sendall('\n')
+            delay_factor = max(delay_factor * 1.1, 8)
+
+        if not self.remote_conn.recv_ready():
+            raise NetMikoTimeoutException("Timed out waiting for recv_ready")
+        return True
 
     def wait_for_recv_ready(self, delay_factor=.1, max_loops=100, send_newline=False):
         """Wait for data to be in the buffer so it can be received."""
-        i = 0
-        time.sleep(delay_factor)
-        while i <= max_loops:
-            if self.remote_conn.recv_ready():
-                return True
-            else:
-                time.sleep(delay_factor)
-                i += 1
-        raise NetMikoTimeoutException("Timed out waiting for recv_ready")
+        timeout = delay_factor * (max_loops + 1)
+        select([self.remote_conn], [], [], timeout)
+
+        if not self.remote_conn.recv_ready():
+            raise NetMikoTimeoutException("Timed out waiting for recv_ready")
+        return True
 
     def set_base_prompt(self, pri_prompt_terminator='#',
                         alt_prompt_terminator='>', delay_factor=.1):
@@ -277,17 +272,16 @@ class BaseSSHConnection(object):
         self.base_prompt = prompt[:-1]
         return self.base_prompt
 
-    def find_prompt(self, delay_factor=.1):
+    def find_prompt(self, delay_factor=.1, max_loop=10):
         """Finds the current network device prompt, last line only."""
         debug = False
         delay_factor = self.select_delay_factor(delay_factor)
         self.clear_buffer()
         self.remote_conn.sendall("\n")
-        time.sleep(delay_factor)
         prompt = ''
 
         # Initial attempt to get prompt
-        if self.remote_conn.recv_ready():
+        if self.wait_for_recv_ready(delay_factor=delay_factor):
             prompt = self.remote_conn.recv(MAX_BUFFER).decode('utf-8', 'ignore')
             prompt = prompt.strip()
             if self.ansi_escape_codes:
@@ -296,8 +290,9 @@ class BaseSSHConnection(object):
         if debug:
             print("prompt1: {}".format(prompt))
         # Check if the only thing you received was a newline
-        count = 0
-        while count <= 10 and not prompt:
+        timeout = delay_factor * max_loop
+        start = time.time()
+        while not prompt and time.time() - start <= timeout:
             if self.wait_for_recv_ready(delay_factor=delay_factor):
                 prompt = self.remote_conn.recv(MAX_BUFFER).decode('utf-8', 'ignore')
                 if debug:
@@ -308,8 +303,7 @@ class BaseSSHConnection(object):
                 prompt = prompt.strip()
             else:
                 self.remote_conn.sendall("\n")
-                time.sleep(delay_factor)
-            count += 1
+                select([self.remote_conn], [], [], delay_factor)
 
         if debug:
             print("prompt3: {}".format(prompt))
@@ -319,7 +313,7 @@ class BaseSSHConnection(object):
         prompt = prompt.strip()
         if not prompt:
             raise ValueError("Unable to find prompt: {}".format(prompt))
-        time.sleep(delay_factor)
+        select([self.remote_conn], [], [], delay_factor)
         self.clear_buffer()
         return prompt
 
@@ -327,8 +321,6 @@ class BaseSSHConnection(object):
         '''Read any data available in the channel up to MAX_BUFFER'''
         if self.remote_conn.recv_ready():
             return self.remote_conn.recv(MAX_BUFFER).decode('utf-8', 'ignore')
-        else:
-            return None
 
     def send_command(self, command_string, delay_factor=.1, max_loops=150,
                      strip_prompt=True, strip_command=True):
@@ -348,16 +340,21 @@ class BaseSSHConnection(object):
             print('In send_command')
 
         delay_factor = self.select_delay_factor(delay_factor)
-        output = ''
         self.clear_buffer()
         command_string = self.normalize_cmd(command_string)
         if debug:
             print("Command is: {0}".format(command_string))
 
         self.remote_conn.sendall(command_string)
-        for tmp_output in self.receive_data_generator(delay_factor=delay_factor,
-                                                      max_loops=max_loops):
-            output += tmp_output
+        output = "".join(
+            (
+                tmp_output for tmp_output in
+                self.receive_data_generator(
+                    delay_factor=delay_factor,
+                    max_loops=max_loops
+                )
+            )
+        )
 
         output = self._sanitize_output(output, strip_command=strip_command,
                                        command_string=command_string, strip_prompt=strip_prompt)
@@ -387,17 +384,19 @@ class BaseSSHConnection(object):
         if not pattern:
             pattern = self.base_prompt
         pattern = re.escape(pattern)
+        regex = re.compile(pattern, flags=re_flags)
         if debug:
             print("Pattern is: {}".format(pattern))
-        while True:
-            try:
+
+        try:
+            while not regex.search(output):
                 output += self.remote_conn.recv(MAX_BUFFER).decode('utf-8', 'ignore')
-                if re.search(pattern, output, flags=re_flags):
-                    if debug:
-                        print("Pattern found: {} {}".format(pattern, output))
-                    return output
-            except socket.timeout:
-                raise NetMikoTimeoutException("Timed-out reading channel, data not available.")
+        except socket.timeout:
+            raise NetMikoTimeoutException("Timed-out reading channel, data not available.")
+
+        if debug:
+            print("Pattern found: {} {}".format(pattern, output))
+        return output
 
     def read_until_prompt_or_pattern(self, pattern='', re_flags=0):
         """Read until either self.base_prompt or pattern is detected. Return ALL data available."""
@@ -406,14 +405,14 @@ class BaseSSHConnection(object):
             pattern = self.base_prompt
         pattern = re.escape(pattern)
         base_prompt_pattern = re.escape(self.base_prompt)
-        while True:
-            try:
+        regex = re.compile("(%s|%s)" % (pattern, base_prompt_pattern), flags=re_flags)
+        try:
+            while not regex.search(output):
                 output += self.remote_conn.recv(MAX_BUFFER).decode('utf-8', 'ignore')
-                if re.search(pattern, output, flags=re_flags) or re.search(base_prompt_pattern,
-                                                                           output, flags=re_flags):
-                    return output
-            except socket.timeout:
-                raise NetMikoTimeoutException("Timed-out reading channel, data not available.")
+        except socket.timeout:
+            raise NetMikoTimeoutException("Timed-out reading channel, data not available.")
+
+        return output
 
     def send_command_expect(self, command_string, expect_string=None,
                             delay_factor=.2, max_loops=500, auto_find_prompt=True,
@@ -455,37 +454,36 @@ class BaseSSHConnection(object):
             print("Command is: {0}".format(command_string))
             print("Search to stop receiving data is: '{0}'".format(search_pattern))
 
-        time.sleep(delay_factor * 1)
+        select([self.remote_conn], [], [], delay_factor)
         self.clear_buffer()
         self.remote_conn.sendall(command_string)
 
         # Initial delay after sending command
-        i = 1
         # Keep reading data until search_pattern is found (or max_loops)
         output = ''
-        while i <= max_loops:
+        timeout = delay_factor * max_loops
+        first_line_regex = re.compile(search_pattern + r".*$")
+        regex = re.compile(search_pattern)
+        start = time.time()
+        while time.time() - start <= timeout and not regex.search(output):
             if self.remote_conn.recv_ready():
                 output += self.remote_conn.recv(MAX_BUFFER).decode('utf-8', 'ignore')
                 if debug:
-                    print("{}:{}".format(i, output))
-                try:
-                    lines = output.split("\n")
+                    print("{}:{}".format(time.time() - start, output))
+
+                lines = output.split("\n")
+                if lines:
                     first_line = lines[0]
                     # First line is the echo line containing the command. In certain situations
                     # it gets repainted and needs filtered
                     if BACKSPACE_CHAR in first_line:
-                        pattern = search_pattern + r'.*$'
-                        first_line = re.sub(pattern, repl='', string=first_line)
+                        first_line = first_line_regex.sub(repl='', string=first_line)
                         lines[0] = first_line
                         output = "\n".join(lines)
-                except IndexError:
-                    pass
-                if re.search(search_pattern, output):
-                    break
             else:
-                time.sleep(delay_factor * 1)
-            i += 1
-        else:   # nobreak
+                select([self.remote_conn], [], [], delay_factor)
+
+        if not regex.search(output):
             raise IOError("Search pattern never detected in send_command_expect: {0}".format(
                 search_pattern))
 
@@ -496,8 +494,8 @@ class BaseSSHConnection(object):
     @staticmethod
     def strip_backspaces(output):
         """Strip any backspace characters out of the output."""
-        backspace_char = '\x08'
-        return output.replace(backspace_char, '')
+        # backspace_char = '\x08'
+        return output.replace('\x08', '')
 
     @staticmethod
     def strip_command(command_string, output):
@@ -506,30 +504,24 @@ class BaseSSHConnection(object):
 
         Cisco IOS adds backspaces into output for long commands (i.e. for commands that line wrap)
         """
-        backspace_char = '\x08'
-
         # Check for line wrap (remove backspaces)
-        if backspace_char in output:
-            output = output.replace(backspace_char, '')
+        if '\x08' in output:
+            output = output.replace('\x08', '')
             output_lines = output.split("\n")
             new_output = output_lines[1:]
             return "\n".join(new_output)
         else:
-            command_length = len(command_string)
-            return output[command_length:]
+            return output[len(command_string):]
 
     @staticmethod
     def normalize_linefeeds(a_string):
         """Convert '\r\r\n','\r\n', '\n\r' to '\n."""
-        newline = re.compile(r'(\r\r\r\n|\r\r\n|\r\n|\n\r)')
-        return newline.sub('\n', a_string)
+        return BaseSSHConnection.newline_regex.sub('\n', a_string)
 
     @staticmethod
     def normalize_cmd(command):
         """Normalize CLI commands to have a single trailing newline."""
-        command = command.rstrip("\n")
-        command += '\n'
-        return command
+        return command.rstrip("\n") + "\n"
 
     def check_enable_mode(self, check_string=''):
         """Check if in enable mode. Return boolean."""
@@ -587,17 +579,16 @@ class BaseSSHConnection(object):
 
     def receive_data_generator(self, delay_factor=.1, max_loops=150):
         """Generator to collect all data available in channel."""
-        i = 0
-        while i <= max_loops:
-            time.sleep(delay_factor)
+        timeout = delay_factor * max_loops
+        start = time.time()
+        while time.time() - start <= timeout and select([self.remote_conn], [], [], delay_factor)[0]:
             if self.remote_conn.recv_ready():
                 yield self.remote_conn.recv(MAX_BUFFER).decode('utf-8', 'ignore')
             else:
                 # Safeguard to make sure really done
-                time.sleep(delay_factor * 8)
+                select([self.remote_conn], [], [], delay_factor * 8)
                 if not self.remote_conn.recv_ready():
                     break
-            i += 1
 
     def send_config_from_file(self, config_file=None, **kwargs):
         """
